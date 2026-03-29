@@ -8,6 +8,7 @@
 
 A closed-loop speed control system for a drill press using:
 - **VFD**: Nidec M200 (Size 2) variable frequency drive for 2HP 3-phase motor
+- **VFD interface**: AI-485 adapter - RS485
 - **Controller**: ESP32 Cheap Yellow Display (CYD) board
 - **Feedback**: Digital tachometer for precise speed measurement
 - **Communication**: RS485 Modbus RTU for bidirectional control and monitoring
@@ -54,14 +55,14 @@ A closed-loop speed control system for a drill press using:
 │  └──────────┬───────────────────┘  │
 │             │                       │
 │  ┌──────────────────────────────┐  │
-│  │   2.8" TFT Display           │  │
+│  │   5" IPS 480x800 (portrait)   │  │
+│  │   - capacitive touch (GT911) │  │
 │  │   - Setpoint RPM             │  │
 │  │   - Actual RPM               │  │
-│  │   - Speed error %            │  │
-│  │   - Motor current (A)        │  │
+│  │   - Direction (FWD/REV)      │  │
 │  │   - Load bar graph           │  │
+│  │   - Speed presets             │  │
 │  │   - System state             │  │
-│  │   - Enable/Disable status    │  │
 │  └──────────────────────────────┘  │
 │                                     │
 │  Control Inputs:                   │
@@ -120,7 +121,7 @@ A closed-loop speed control system for a drill press using:
 |-----------|-------------------|---------|-------|
 | VFD | Nidec M200-022-00075A | Motor control | Size 2, 230V 3-phase, 7.5A |
 | RS485 Interface | AI-485 Adaptor | Modbus communication | Mounts on M200 |
-| Controller | ESP32 CYD | PID + Display | 2.8" TFT, WiFi capable |
+| Controller | ESP32-8048S050C (CYD) | PID + Display | ESP32-S3, 5" IPS 800×480 portrait, capacitive touch (GT911), 8M PSRAM, 16M Flash |
 | Level Shifter | MAX485 / MAX3485 | RS485 interface | TTL to RS485 |
 | Speed Control | Grayhill 62A22-02-045CH | Setpoint input | Quadrature encoder, 45° detent, push button |
 | Tachometer | Single pulse output | Speed feedback | 1-4 PPR (configurable) |
@@ -252,19 +253,7 @@ Internal ESP32 pullups enabled, or add external:
 
 ---
 
-## Software Configuration
-
-### M200 Drive Parameters
-
-#### Basic Setup
-```
-Pr 05 (Drive Configuration) = 0 (AV) or 1 (AI)
-Pr 06 (Motor Rated Current) = 7.5 A (Marathon SKV145THTR5329AA @ 230V)
-Pr 07 (Motor Rated Speed) = 1750 RPM (full load speed)
-Pr 08 (Motor Rated Voltage) = 230 V (for 230V connection)
-Pr 39 (Motor Rated Frequency) = 60 Hz
-Pr 40 (Number of Motor Poles) = 4 (or Auto)
-```
+## Configuration
 
 **Marathon Motor Nameplate Data:**
 - Model: SKV145THTR5329AA
@@ -275,39 +264,6 @@ Pr 40 (Number of Motor Poles) = 4 (or Auto)
 - Current: 7.5A @ 230V, 3.75A @ 460V
 - Frequency: 60 Hz
 - Service Factor: 1.0
-
-#### Modbus Communication
-```
-Pr 43 (Serial Baud Rate) = 7 (38400 baud)
-Pr 44 (Serial Address) = 1
-Pr 11.024 (Serial Mode) = 1 (8-1-NP: 8 data bits, 1 stop, no parity)
-Pr 45 (Reset Serial Comms) = 1 (activate changes, then resets to 0)
-```
-
-#### Control Mode
-```
-Pr 79 (User Drive Mode) = 1 (Open Loop) 
-Pr 41 (Control Mode) = 4 (Ur.I - Open loop vector with current control)
-Pr 31 (Stop Mode) = 1 (rp - ramp to stop)
-```
-
-#### Ramp Settings
-```
-Pr 03 (Acceleration Rate 1) = 5.0 s/100Hz
-Pr 04 (Deceleration Rate 1) = 10.0 s/100Hz
-Pr 28 (Ramp Mode Select) = 1 (Standard)
-```
-
-#### Protection
-```
-Pr 01 (Minimum Speed) = 5.0 Hz
-Pr 02 (Maximum Speed) = 60.0 Hz
-Pr 37 (Maximum Switching Frequency) = 3 kHz (or higher for quieter operation)
-```
-
-**Note**: After changing parameters, execute a parameter save:
-1. Set Pr 00 = 1 (Save) or enter value 1001
-2. Press red reset button or send reset command via Modbus
 
 ### ESP32 Configuration Constants
 
@@ -413,81 +369,6 @@ Test at maximum speed limit:
 2. Verify system doesn't accumulate excessive integral
 3. Check smooth transition when limit released
 4. Adjust `MAX_INTEGRAL` if needed
-
----
-
-## Modbus Communication
-
-### Modbus RTU Configuration
-- **Protocol**: Modbus RTU (binary)
-- **Baud Rate**: 38400 bps
-- **Data Format**: 8 data bits, No parity, 1 stop bit (8-N-1)
-- **Slave Address**: 1 (configurable via Pr 44)
-- **Update Rate**: 10 Hz for monitoring, 50 Hz for control
-
-### Key Modbus Registers (M200)
-
-#### Read Registers (Function Code 0x03)
-| Register | Parameter | Description | Units | Scale |
-|----------|-----------|-------------|-------|-------|
-| 0x0001 | Pr 01 | Minimum Speed | Hz | ×100 |
-| 0x0002 | Pr 02 | Maximum Speed | Hz | ×100 |
-| 0x0054 | Pr 84 | DC Bus Voltage | V | ×1 |
-| 0x0055 | Pr 85 | Output Frequency | Hz | ×100 |
-| 0x0056 | Pr 86 | Output Voltage | V | ×1 |
-| 0x0057 | Pr 87 | Motor RPM | RPM | ×1 |
-| 0x0058 | Pr 88 | Current Magnitude | A | ×100 |
-| 0x0059 | Pr 89 | Torque Producing Current | A | ×100 |
-
-**Example**: Reading motor current (Pr 88)
-- Raw value: 850
-- Actual current: 850 / 100 = 8.50 A
-
-#### Write Registers (Function Code 0x06)
-| Register | Parameter | Description | Units | Scale |
-|----------|-----------|-------------|-------|-------|
-| 0x0001 | Pr 01 | Frequency Reference* | Hz | ×100 |
-| 0x006E | Pr 110 | Direct Frequency Ref | Hz | ×100 |
-
-*Actual parameter depends on Drive Configuration setting
-
-**Example**: Writing 45.5 Hz frequency command
-- Desired frequency: 45.5 Hz
-- Scaled value: 45.5 × 100 = 4550
-- Modbus command: Write 4550 to register 0x0001
-
-#### Control Registers
-| Register | Parameter | Description | Values |
-|----------|-----------|-------------|--------|
-| 0x0006 | Pr 06.015 | Drive Enable | 0=Disabled, 1=Enabled |
-| 0x0000 | Pr 00 | System Commands | See command table below |
-
-**Pr 00 Command Values**:
-- 0: No action
-- 1001: Save parameters
-- 1233: Load 50 Hz defaults
-- 1244: Load 60 Hz defaults
-
-### Modbus Communication Error Handling
-
-#### Timeouts
-```cpp
-const unsigned long MODBUS_TIMEOUT = 500;  // 500ms timeout
-const uint8_t MAX_RETRIES = 3;
-
-uint8_t result = node.readHoldingRegisters(register, count);
-if (result != node.ku8MBSuccess) {
-  // Handle error: retry, use last known value, or fault
-}
-```
-
-#### Common Error Codes
-- `ku8MBSuccess` (0x00): Success
-- `ku8MBIllegalFunction` (0x01): Invalid function code
-- `ku8MBIllegalDataAddress` (0x02): Invalid register address
-- `ku8MBIllegalDataValue` (0x03): Invalid data value
-- `ku8MBSlaveDeviceFailure` (0x04): Slave device fault
-- Timeout: No response from device
 
 ---
 
@@ -643,102 +524,161 @@ Use 220Ω as universal value (safe for all LED types).
 
 ---
 
+## Touchscreen UI
+
+### Display Orientation
+
+The CYD is mounted in **portrait orientation**: 480 pixels wide × 800 pixels tall. All UI layout is designed for this aspect ratio.
+
+### Operator Controls
+
+| Control | Type | Function |
+|---------|------|----------|
+| Rotary Encoder | Grayhill 62A22 w/ pushbutton | Primary speed adjustment (free dial), preset selection |
+| Start Button | Physical momentary (NO) | Enable drive — software cannot start the motor |
+| Stop Button | Physical momentary (NO) | Disable drive — software cannot start the motor |
+| Power Off | Physical toggle (elsewhere on machine) | Full system power off |
+| Touchscreen | 5" capacitive (GT911) | Presets, direction, settings, numpad speed entry |
+
+**Design principle**: The motor can only be started/stopped by physical buttons. The touchscreen controls setpoint, direction, and configuration — never run/stop.
+
+### Screens
+
+1. **Main Screen** — always-visible operating view
+2. **Numpad Overlay** — modal, for direct RPM entry
+3. **Preset Label Keyboard** — modal, for naming a preset slot
+4. **Settings Screen** — full-screen, accessed via gear icon (disabled while inverter is on)
+5. **Fault Overlay** — modal, appears over main screen on VFD fault
+
+### Main Screen
+
+The main screen is the always-visible operating view. All elements are sized to be readable at arm's length. Layout is portrait (480 wide × 800 tall).
+
+```
+┌──────────────────────────┐
+│  DRILLZILLA    READY  ●  │  ← Status bar: state, comms health icon
+│──────────────────────────│
+│                          │
+│        ► FWD             │  ← Direction toggle (tap when stopped)
+│                          │
+│        1275              │  ← Actual RPM (large, dominant)
+│         RPM              │
+│                          │
+│     ──── 1300 ────       │  ← Setpoint RPM (tap → numpad)
+│                          │
+│  ┌────────────────────┐  │
+│  │████████████░░░░░░░░│  │  ← Load bar (% rated current)
+│  │      62%           │  │
+│  └────────────────────┘  │
+│                          │
+│  ┌────┐ ┌────┐ ┌────┐   │
+│  │ 300│ │ 600│ │ 900│   │  ← Speed presets (2×3 grid, 6 max)
+│  │Wood│ │Stl │ │Alum│   │     Tap: select preset
+│  └────┘ └────┘ └────┘   │     Long-press: save current speed
+│  ┌────┐ ┌────┐ ┌────┐   │       + open label keyboard
+│  │1200│ │1500│ │    │   │     Empty slots show "+"
+│  │Tap │ │Fin │ │ +  │   │
+│  └────┘ └────┘ └────┘   │
+│                       ⚙  │  ← Settings gear (disabled while
+│                          │     inverter is on)
+└──────────────────────────┘
+```
+
+**Main screen elements (top to bottom):**
+
+| # | Element | Widget | Interaction | Notes |
+|---|---------|--------|-------------|-------|
+| 1 | Status bar | Label row | Read-only | System state (READY / RUNNING / OVERLOAD / FAULT) + Modbus comms icon (●/✕) |
+| 2 | Direction indicator | Toggle button | Tap to switch FWD ↔ REV | Disabled (greyed, no tap) while inverter is on |
+| 3 | Actual RPM | Large label | Read-only | Biggest element on screen. 5 Hz update rate |
+| 4 | Setpoint RPM | Label + tap zone | Tap opens numpad; encoder adjusts freely | Smaller than actual RPM. Visible "tap to edit" affordance |
+| 5 | Load bar | Progress bar | Read-only | Full width. Green < 60%, yellow 60–80%, red > 80%. Percentage label inside. On overload: bar turns red and flashes 3× rapidly |
+| 6 | Preset grid | Button grid 2×3 | Tap: select. Long-press: save + label | Each shows RPM (top) + label (bottom). 6 slots max. Empty = "+" |
+| 7 | Settings gear | Icon button | Tap opens settings | Disabled while inverter is on |
+
+### Numpad Overlay
+
+Modal overlay opened by tapping the setpoint RPM on the main screen.
+
+| Element | Widget | Notes |
+|---------|--------|-------|
+| Current value | Label | Shows digits as entered |
+| Number keys 0–9 | Button grid 4×3 | Large, glove-friendly targets |
+| Backspace | Button | Clears last digit |
+| OK | Button | Accepts if within MIN–MAX RPM, closes overlay |
+| Cancel | Button | Discards entry, closes overlay |
+| Range indicator | Label | Shows "200–1800 RPM" |
+
+### Preset Label Keyboard
+
+Modal overlay opened by long-pressing a preset slot.
+
+| Element | Widget | Notes |
+|---------|--------|-------|
+| Text field | Label + cursor | Current label, max ~6 chars (must fit on preset button) |
+| Keyboard | LVGL keyboard | Alpha-only, no symbols needed |
+| OK / Cancel | Buttons | Save or discard label |
+
+The current setpoint RPM is saved to the slot when the long-press is detected (before the keyboard opens). The keyboard is only for naming.
+
+### Settings Screen
+
+Full-screen replacement of main screen. **Disabled while inverter is on** — gear icon is greyed out and non-interactive when the drive is enabled.
+
+| Element | Widget | Notes |
+|---------|--------|-------|
+| Back button | Arrow / button | Returns to main screen |
+| **PID Tuning** | | |
+| Kp | Spinbox with +/- | Proportional gain |
+| Ki | Spinbox with +/- | Integral gain |
+| Kd | Spinbox with +/- | Derivative gain |
+| **Ramp Times** | | |
+| Ramp Up | Spinbox (seconds) | Acceleration ramp |
+| Ramp Down | Spinbox (seconds) | Deceleration ramp |
+| **Hardware** | | |
+| Tach PPR | Dropdown | Values: 1, 2, 3, 4 |
+| Direction swap | Toggle switch | Inverts FWD/REV mapping |
+| **Presets Editor** | List | Tap to rename, reorder via up/down buttons |
+
+### Fault Overlay
+
+Modal overlay that appears over the main screen when the VFD reports a fault.
+
+| Element | Widget | Notes |
+|---------|--------|-------|
+| Fault banner | Large label, red background | Covers top portion of screen |
+| Fault description | Label | Plain English (e.g. "OVERCURRENT", not raw Pr codes) |
+| Instructions | Label | "Press STOP to clear" |
+
+Modbus communication loss is also shown as a fault.
+
+### Physical Control Mapping
+
+| Control | Function |
+|---------|----------|
+| Rotary encoder turn | Adjust setpoint RPM (free dial, always active) |
+| Encoder pushbutton | Reserved for cycle applications (tapping mode — future) |
+| Start button | Enable drive (physical only, not mirrored in UI) |
+| Stop button | Disable drive (physical only, not mirrored in UI) |
+
+### Overload Behavior
+
+When overload is detected (current > 90% rated AND speed error > 15%):
+- Status bar changes to OVERLOAD
+- Load bar turns solid red and **flashes 3× rapidly**, then holds red
+- System reduces output by 50%
+- Clears automatically when current drops below 70% rated
+
+### Future UI Features
+
+- [ ] Depth indicator display (requires depth sensor hardware)
+- [ ] Beeper/speaker alerts (approach speed, overload warning, fault)
+- [ ] Tapping mode — encoder pushbutton triggers reverse at set depth
+- [ ] Belt/pulley range advisor (suggest sheave position for target speed range)
+- [ ] Rolling load trend graph
+- [ ] Tool/material speed lookup
+
 ---
-
-## Troubleshooting
-
-### Speed Control Issues
-
-| Symptom | Possible Cause | Solution |
-|---------|----------------|----------|
-| Speed oscillates | Kp too high | Reduce Kp by 25% |
-| Slow response to changes | Kp too low | Increase Kp by 50% |
-| Speed droop under load | Ki too low | Increase Ki by 50% |
-| Slow oscillation | Ki too high | Reduce Ki by 25% |
-| Overshoot on start | Kp too high, no Kd | Reduce Kp or add small Kd |
-| No speed control | Tach not connected | Check PCNT is counting pulses |
-| Erratic speed reading | Noise on tach signal | Add filter capacitor, check shielding |
-| Speed limit not working | MAX_SPEED_HZ too high | Verify Pr 02 and MAX_SPEED_HZ match |
-
-### Communication Issues
-
-| Symptom | Possible Cause | Solution |
-|---------|----------------|----------|
-| No Modbus communication | Wrong baud rate | Verify Pr 43 = 38400 baud |
-| | Wrong address | Verify Pr 44 matches code |
-| | Wiring reversed | Swap A and B lines |
-| | No termination | Add 120Ω resistor at M200 |
-| Intermittent communication | Noise on RS485 | Use shielded twisted pair |
-| | Ground loop | Ground shield at one end only |
-| Communication errors | Long cable run | Reduce baud rate to 19200 |
-| Display shows old data | Modbus timeout | Check error handling, retry logic |
-
-### Tachometer Issues
-
-| Symptom | Possible Cause | Solution |
-|---------|----------------|----------|
-| RPM reads zero | No signal | Check tach power, wiring |
-| | Wrong GPIO | Verify TACH_PIN = 34 |
-| | PCNT not configured | Check setupPCNT() called |
-| RPM too high | Wrong PPR setting | Verify TACH_PPR matches tach spec |
-| RPM too low | Wrong PPR setting | Verify TACH_PPR matches tach spec |
-| | Counting both edges | Change to COUNT_INC only |
-| Noisy RPM reading | Electrical noise | Add 100pF cap, use shielded cable |
-| | Wrong filter setting | Adjust RPM_FILTER_ALPHA |
-| RPM not updating | Sample period too long | Reduce SAMPLE_PERIOD_MS |
-
-### Drive Issues
-
-| Symptom | Possible Cause | Solution |
-|---------|----------------|----------|
-| Drive won't enable | Terminal 11 not high | Check enable signal wiring |
-| | Drive tripped | Read Pr 56-58 for trip code |
-| | Undervoltage | Check input power |
-| Motor won't run | No run command | Check Terminal 12/13 |
-| | Frequency = 0 | Verify Modbus write successful |
-| Motor overheats | Current too high | Verify Pr 06 = motor nameplate |
-| | Low speed operation | Check ventilation, use forced fan |
-| Excessive current | Mechanical binding | Check spindle/bearings |
-| | Wrong motor parameters | Verify Pr 06, 07, 08 match motor |
-| Drive overheats | Switching freq too high | Reduce Pr 37 |
-| | Poor ventilation | Clean filters, check fans |
-
-### Display Issues
-
-| Symptom | Possible Cause | Solution |
-|---------|----------------|----------|
-| Display blank | No power | Check USB power |
-| | TFT not initialized | Verify TFT_eSPI configuration |
-| Display frozen | Code crashed | Check Serial for errors, reboot |
-| Wrong values displayed | Unit conversion error | Verify scaling factors |
-| Display flickers | Update rate too fast | Increase display update period |
-
----
-
-## Safety Considerations
-
-### Electrical Safety
-
-1. **Line Power**
-   - Use properly rated circuit breaker for M200 input
-   - Follow NEC/local electrical codes
-   - Ground drive chassis properly
-
-2. **Control Wiring**
-   - Separate control wiring from power wiring
-   - Use appropriate wire gauge for current loads
-   - Secure all connections with proper terminals
-
-3. **Emergency Stop**
-   - Hardwire E-stop to break drive enable (Terminal 11)
-   - E-stop must be easily accessible
-   - Use normally-closed E-stop button
-   - Test E-stop function regularly
-
-4. **Enclosure**
-   - Use NEMA-rated enclosure appropriate for environment
-   - Ensure proper ventilation for drive cooling
-   - Protect from moisture, dust, metal chips
 
 ### Mechanical Safety
 
@@ -779,13 +719,15 @@ Use 220Ω as universal value (safe for all LED types).
 
 ## Future Enhancements
 
+### Hardware Additions
+- [ ] Depth sensor + quill position display
+- [ ] Beeper/speaker for alerts (approach speed, overload, fault)
+- [ ] Belt/pulley range advisor (suggest sheave position for target speed range)
+
 ### Planned Features
-- [ ] Touchscreen speed setpoint entry
-- [ ] Preset speed memory (common drilling speeds)
+- [ ] Tapping mode (auto-reverse at set depth, requires depth sensor)
 - [ ] Data logging to SD card
-- [ ] WiFi monitoring/control interface
-- [ ] Automatic feed rate control
-- [ ] Tap cycle automation (reverse after depth)
+- [ ] Rolling load trend graph
 - [ ] Material-specific speed recommendations
 - [ ] Tool library with optimal speeds
 
@@ -797,138 +739,8 @@ Use 220Ω as universal value (safe for all LED types).
 - [ ] Vibration monitoring (using accelerometer)
 
 ### Connectivity
+- [ ] WiFi monitoring/control interface
 - [ ] MQTT for remote monitoring
 - [ ] Web interface for configuration
 - [ ] Integration with shop automation system
 - [ ] Tool usage tracking
-
----
-
-## Bill of Materials
-
-### Electronics
-
-| Item | Part Number | Qty | Est. Cost | Source | Notes |
-|------|-------------|-----|-----------|--------|-------|
-| VFD | M200-022-00075A | 1 | $400-600 | Nidec dealer | 2HP, 230V, 7.5A |
-| Modbus Interface | AI-485 Adaptor | 1 | $100-150 | Nidec dealer | For M200 |
-| Controller | ESP32 CYD | 1 | $15-25 | AliExpress | 2.8" display included |
-| RS485 Module | MAX485/MAX3485 | 1 | $2-5 | Amazon/eBay | TTL to RS485 |
-| Speed Control | Grayhill 62A22-02-045CH | 1 | $15-25 | Mouser/Digikey | Encoder with button |
-| ON Button | Momentary SPST NO | 1 | $3-8 | Amazon | 16mm panel mount |
-| OFF Button | Momentary SPST NO | 1 | $3-8 | Amazon | 16mm panel mount |
-| Status LED | High-brightness LED | 1 | $1-3 | Amazon | Green, with bezel |
-| Resistor | 220Ω 1/4W | 1 | <$1 | Amazon | For LED current limit |
-| Tachometer | Single pulse, 1-4 PPR | 1 | $50-200 | Various | Shaft mount |
-| Resistors | Assorted | - | $5 | Amazon | For pullups if needed |
-| Capacitors | 100pF, 0.1µF | - | $5 | Amazon | Filtering |
-
-### Hardware
-
-| Item | Specification | Qty | Est. Cost | Notes |
-|------|---------------|-----|-----------|-------|
-| Enclosure | NEMA 4X | 1 | $50-150 | For controller & display |
-| Cable, RS485 | Shielded twisted pair | 10ft | $15-25 | 22AWG or better |
-| Cable, Tach | Shielded | 10ft | $10-20 | Depends on tach type |
-| Terminal Blocks | DIN rail mount | As needed | $10-20 | For wiring organization |
-| E-Stop Button | NC, 22mm | 1 | $10-20 | Mushroom head |
-| Run/Stop Buttons | NO/NC | 2 | $10 | Optional |
-| DIN Rail | 35mm | 1m | $5-10 | For mounting terminals |
-
-### Consumables
-
-| Item | Notes |
-|------|-------|
-| Wire, 18AWG | For control circuits |
-| Wire, 22AWG | For low-voltage signals |
-| Heat shrink tubing | Various sizes |
-| Cable ties | UV resistant |
-| Labels | For wire identification |
-
-**Total Estimated Cost**: $700-1200 (not including motor)
-
----
-
-## Document Revision History
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.1 | 2024-11-12 | Initial | Initial draft |
-
----
-
-## References
-
-### Documentation
-- [Nidec M200 Control User Guide](https://www.nidec-netherlands.nl/media/3523-frequentieregelaars-unidrive-m200-m201-control-user-guide-en-iss3-0478-0351-03.pdf)
-- [Nidec M200 Parameter Reference Guide](https://acim.nidec.com/drives/control-techniques/)
-- [ESP32 PCNT Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/pcnt.html)
-- [Modbus Protocol Specification](https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf)
-
-### Tools
-- Nidec CTSoft - Drive configuration software
-- Arduino IDE / PlatformIO - ESP32 development
-- Serial monitor - Modbus debugging
-
-### Support
-- Nidec Technical Support: 1-800-893-2321
-- ESP32 Forums: [esp32.com](https://www.esp32.com/)
-
----
-
-## Appendix A: Complete Source Code
-
-See separate file: `drill_press_controller.ino`
-
-The complete Arduino/PlatformIO source code includes:
-- Grayhill 62A22-02-045CH encoder handling with interrupts
-- Hardware pulse counting for single-pulse tachometer (1-4 PPR)
-- PID control loop at 50 Hz
-- Modbus RTU communication with M200 drive
-- TFT display with real-time monitoring
-- Overload detection and protection
-- Preset speed selection via encoder button
-
-**Key Features:**
-- Interrupt-driven quadrature decoding for smooth encoder response
-- Anti-windup PID with integral limiting
-- Low-pass filtering for stable RPM readings at low PPR
-- 5 preset speeds (300, 600, 900, 1200, 1500 RPM)
-- Real-time current and load monitoring
-- Comprehensive serial debug output
-
----
-
-## Appendix B: Parameter Quick Reference
-
-### Critical M200 Parameters
-```
-Pr 05 = 0 or 1         (Drive configuration)
-Pr 06 = 7.5            (Motor rated current - 230V)
-Pr 07 = 1750           (Motor rated speed - RPM)
-Pr 08 = 230            (Motor rated voltage)
-Pr 39 = 60             (Motor rated frequency)
-Pr 40 = 4              (Motor poles)
-Pr 43 = 7              (38400 baud)
-Pr 44 = 1              (Modbus address)
-```
-
-### Critical ESP32 Constants
-```cpp
-#define TACH_PPR 1              // Start with 1 PPR
-#define MOTOR_POLES 4           // Marathon 4-pole motor
-const float CURRENT_LIMIT = 7.5; // Marathon rated current @ 230V
-#define ENCODER_A 32            // Grayhill channel A
-#define ENCODER_B 33            // Grayhill channel B
-#define ENCODER_BTN 25          // Grayhill push button
-```
-
----
-
-## Appendix C: Wiring Diagrams
-
-*[Detailed wiring diagrams to be added]*
-
----
-
-**END OF DOCUMENT**
